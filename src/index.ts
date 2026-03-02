@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createServer } from "http";
 
 const twilio = require("twilio");
 
@@ -109,6 +110,15 @@ async function main() {
   console.log(`Loaded ${initial.length} existing message(s) — they will be skipped.`);
   console.log(`Polling every ${config.pollInterval}s — press Ctrl+C to stop.\n`);
 
+  // Health-check HTTP server (DO needs this to know we're alive)
+  const healthServer = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("I'm alive, but at what cost? Forwarding OTPs for a living. Send help (or SMS).");
+  });
+  healthServer.listen(8080, () => {
+    console.log("Health check listening on :8080 — yes, I'm still here.");
+  });
+
   // Poll loop
   const poll = async () => {
     try {
@@ -140,6 +150,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = () => {
     clearInterval(timer);
+    healthServer.close();
     console.log("\nShutting down. Goodbye!");
     process.exit(0);
   };

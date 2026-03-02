@@ -98,6 +98,17 @@ pm2 save
 pm2 startup
 ```
 
+## Health check
+
+Carbonara now comes with a built-in health check on **port 8080**, because DigitalOcean kept poking it and asking "are you still alive?" like an anxious parent.
+
+Hit any route and it'll respond with a 200 and an existential crisis. It's the bare minimum to prove this thing hasn't died — kind of like replying "k" to a text.
+
+```
+$ curl http://localhost:8080
+I'm alive, but at what cost? Forwarding OTPs for a living. Send help (or SMS).
+```
+
 ## Tech stack
 
 - **Twilio SDK** — fetches SMS like a golden retriever fetches balls
