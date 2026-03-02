@@ -1,0 +1,19 @@
+{
+  "name": "@mtropro/virtual-otp",
+  "version": "1.0.0",
+  "description": "SMS-to-Telegram forwarder — polls Twilio for inbound SMS and forwards to Telegram",
+  "private": true,
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "twilio": "^4.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.2"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "preserveConstEnums": true,
+    "strictNullChecks": true,
+    "sourceMap": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "target": "es2017",
+    "outDir": ".build",
+    "moduleResolution": "node",
+    "lib": ["es2015"],
+    "types": ["node"],
+    "rootDir": "./",
+    "inlineSources": true,
+    "sourceRoot": "/"
+  },
+  "include": ["src/**/*.ts"]
+}
