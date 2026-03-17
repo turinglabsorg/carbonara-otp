@@ -5,14 +5,17 @@
     "sourceMap": true,
     "allowJs": true,
     "resolveJsonModule": true,
-    "target": "es2017",
+    "target": "es2022",
     "outDir": ".build",
-    "moduleResolution": "node",
-    "lib": ["es2015"],
+    "moduleResolution": "bundler",
+    "lib": ["es2022"],
+    "module": "es2022",
     "types": ["node"],
     "rootDir": "./",
     "inlineSources": true,
-    "sourceRoot": "/"
+    "sourceRoot": "/",
+    "jsx": "react-jsx",
+    "esModuleInterop": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
