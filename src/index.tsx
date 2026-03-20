@@ -31,6 +31,8 @@ interface Config {
   telegramBotToken?: string;
   telegramChatId?: string;
   telegramEnabled: boolean;
+  discordWebhookUrl?: string;
+  discordEnabled: boolean;
   pollInterval: number;
 }
 
@@ -42,6 +44,7 @@ function getConfig(): Config {
   const phoneNumber = process.env.TWILIO_PHONE_NUMBER?.replace(/^["']|["']$/g, "");
   const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || undefined;
   const telegramChatId = process.env.TELEGRAM_CHAT_ID || undefined;
+  const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL || undefined;
   const pollInterval = parseInt(process.env.POLL_INTERVAL || "10", 10);
 
   if (!accountSid || !authToken || !phoneNumber) {
@@ -51,8 +54,9 @@ function getConfig(): Config {
   }
 
   const telegramEnabled = !!(telegramBotToken && telegramChatId);
+  const discordEnabled = !!discordWebhookUrl;
 
-  return { accountSid, authToken, phoneNumber, label: envLabel, telegramBotToken, telegramChatId, telegramEnabled, pollInterval };
+  return { accountSid, authToken, phoneNumber, label: envLabel, telegramBotToken, telegramChatId, telegramEnabled, discordWebhookUrl, discordEnabled, pollInterval };
 }
 
 // ── Port finder ─────────────────────────────────────────────────────
@@ -127,6 +131,32 @@ function formatTelegramMessage(msg: SmsMessage): string {
     `<b>Time:</b> ${escapeHtml(time)}`,
     ``,
     escapeHtml(msg.body),
+  ].join("\n");
+}
+
+// ── Discord helpers ─────────────────────────────────────────────────
+
+async function sendDiscordMessage(webhookUrl: string, content: string) {
+  const res = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Discord webhook error (${res.status}): ${text}`);
+  }
+}
+
+function formatDiscordMessage(msg: SmsMessage): string {
+  const time = new Date(msg.dateCreated).toLocaleString();
+  return [
+    `📱 **New SMS Received**`,
+    `**From:** ${msg.from}`,
+    `**To:** ${msg.to}`,
+    `**Time:** ${time}`,
+    ``,
+    msg.body,
   ].join("\n");
 }
 
@@ -277,13 +307,22 @@ function App({ config, client, initialMessages }: AppProps) {
             return next;
           });
 
-          // Forward inbound to Telegram
-          if (config.telegramEnabled) {
-            for (const msg of newMessages.filter((m) => m.direction === "inbound")) {
-              try {
-                const html = formatTelegramMessage(msg as SmsMessage);
-                await sendTelegramMessage(config.telegramBotToken!, config.telegramChatId!, html);
-              } catch {}
+          // Forward inbound to configured channels
+          const inboundMessages = newMessages.filter((m) => m.direction === "inbound");
+          if (inboundMessages.length > 0) {
+            for (const msg of inboundMessages) {
+              if (config.telegramEnabled) {
+                try {
+                  const html = formatTelegramMessage(msg as SmsMessage);
+                  await sendTelegramMessage(config.telegramBotToken!, config.telegramChatId!, html);
+                } catch {}
+              }
+              if (config.discordEnabled) {
+                try {
+                  const text = formatDiscordMessage(msg as SmsMessage);
+                  await sendDiscordMessage(config.discordWebhookUrl!, text);
+                } catch {}
+              }
             }
           }
         }
@@ -469,10 +508,13 @@ async function main() {
   // Find available port in 6000-7000 range
   const port = await findAvailablePort(6000, 7000);
 
-  // Validate Telegram (if configured)
+  // Validate configured channels
   if (config.telegramEnabled) {
     const me = await telegramRequest(config.telegramBotToken!, "getMe");
     process.stderr.write(`Telegram bot: @${me.username}\n`);
+  }
+  if (config.discordEnabled) {
+    process.stderr.write(`Discord webhook: enabled\n`);
   }
 
   // Create Twilio client
@@ -514,7 +556,56 @@ async function main() {
     process.stderr.write(`Health check on :${port}\n`);
   });
 
-  // Render TUI
+  // If no TTY (e.g. container), run headless polling instead of interactive TUI
+  if (!process.stdin.isTTY) {
+    process.stderr.write(`No TTY detected — running in headless mode\n`);
+    const seenSids = new Set<string>(initialMessages.map((m) => m.sid));
+    const seenFingerprints = new Set<string>(initialMessages.map(msgFingerprint));
+
+    const poll = async () => {
+      try {
+        const [inb, outb] = await Promise.all([
+          client.messages.list({ to: config.phoneNumber, limit: 100 }),
+          client.messages.list({ from: config.phoneNumber, limit: 100 }),
+        ]);
+        const byId = new Map<string, any>();
+        for (const m of inb) byId.set(m.sid, { ...m, direction: "inbound" });
+        for (const m of outb) if (!byId.has(m.sid)) byId.set(m.sid, { ...m, direction: "outbound" });
+
+        for (const msg of byId.values()) {
+          if (seenSids.has(msg.sid)) continue;
+          seenSids.add(msg.sid);
+          if (msg.direction === "outbound" && isAutoReply(msg.body)) continue;
+
+          const parsed: SmsMessage = {
+            sid: msg.sid, from: msg.from, to: msg.to, body: msg.body,
+            direction: msg.direction, dateCreated: new Date(msg.dateCreated),
+          };
+          const fp = msgFingerprint(parsed);
+          if (seenFingerprints.has(fp)) continue;
+          seenFingerprints.add(fp);
+
+          if (msg.direction === "inbound") {
+            process.stderr.write(`[SMS] ${msg.from} → ${msg.body.substring(0, 80)}\n`);
+            if (config.telegramEnabled) {
+              try { await sendTelegramMessage(config.telegramBotToken!, config.telegramChatId!, formatTelegramMessage(parsed)); } catch {}
+            }
+            if (config.discordEnabled) {
+              try { await sendDiscordMessage(config.discordWebhookUrl!, formatDiscordMessage(parsed)); } catch {}
+            }
+          }
+        }
+      } catch (err: any) {
+        process.stderr.write(`Poll error: ${err.message}\n`);
+      }
+    };
+
+    setInterval(poll, config.pollInterval * 1000);
+    // Keep process alive
+    await new Promise(() => {});
+  }
+
+  // Render TUI (TTY mode)
   const { waitUntilExit } = render(
     <App config={config} client={client} initialMessages={initialMessages} />
   );
