@@ -315,12 +315,14 @@ function App({ config, client, initialMessages }: AppProps) {
                 try {
                   const html = formatTelegramMessage(msg as SmsMessage);
                   await sendTelegramMessage(config.telegramBotToken!, config.telegramChatId!, html);
+                  process.stderr.write(`[TUI] Forwarded SMS from ${(msg as SmsMessage).from} to Telegram (${(msg as SmsMessage).sid})\n`);
                 } catch {}
               }
               if (config.discordEnabled) {
                 try {
                   const text = formatDiscordMessage(msg as SmsMessage);
                   await sendDiscordMessage(config.discordWebhookUrl!, text);
+                  process.stderr.write(`[TUI] Forwarded SMS from ${(msg as SmsMessage).from} to Discord (${(msg as SmsMessage).sid})\n`);
                 } catch {}
               }
             }
@@ -509,12 +511,11 @@ async function main() {
   const port = await findAvailablePort(6000, 7000);
 
   // Validate configured channels
+  process.stderr.write(`[STARTUP] Telegram: ${config.telegramEnabled ? "ENABLED" : "DISABLED"}\n`);
+  process.stderr.write(`[STARTUP] Discord: ${config.discordEnabled ? "ENABLED" : "DISABLED"}\n`);
   if (config.telegramEnabled) {
     const me = await telegramRequest(config.telegramBotToken!, "getMe");
-    process.stderr.write(`Telegram bot: @${me.username}\n`);
-  }
-  if (config.discordEnabled) {
-    process.stderr.write(`Discord webhook: enabled\n`);
+    process.stderr.write(`[STARTUP] Telegram bot: @${me.username}\n`);
   }
 
   // Create Twilio client
@@ -588,10 +589,19 @@ async function main() {
           if (msg.direction === "inbound") {
             process.stderr.write(`[SMS] ${msg.from} → ${msg.body.substring(0, 80)}\n`);
             if (config.telegramEnabled) {
-              try { await sendTelegramMessage(config.telegramBotToken!, config.telegramChatId!, formatTelegramMessage(parsed)); } catch {}
+              try {
+                await sendTelegramMessage(config.telegramBotToken!, config.telegramChatId!, formatTelegramMessage(parsed));
+                process.stderr.write(`[HEADLESS] Forwarded SMS from ${msg.from} to Telegram (${msg.sid})\n`);
+              } catch {}
             }
             if (config.discordEnabled) {
-              try { await sendDiscordMessage(config.discordWebhookUrl!, formatDiscordMessage(parsed)); } catch {}
+              try {
+                await sendDiscordMessage(config.discordWebhookUrl!, formatDiscordMessage(parsed));
+                process.stderr.write(`[HEADLESS] Forwarded SMS from ${msg.from} to Discord (${msg.sid})\n`);
+              } catch {}
+            }
+            if (!config.telegramEnabled && !config.discordEnabled) {
+              process.stderr.write(`[HEADLESS] WARNING: No notification channel enabled for SMS from ${msg.from} (${msg.sid})\n`);
             }
           }
         }
